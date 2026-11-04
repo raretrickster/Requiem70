@@ -1,30 +1,71 @@
-import { createHash, timingSafeEqual } from 'node:crypto';
+const BOT_TOKEN = process.env.BOT_TOKEN || process.env.TELEGRAM_BOT_TOKEN;
+const ADMIN_IDS = [7330059190, 6796155106];
 
-const TELEGRAM_API = 'https://api.telegram.org';
+const SITE = 'https://xn--b1afblipw.com/';
+const CATALOG_URL = `${SITE}pamyatniki.html`;
+const WORKS_URL = `${SITE}raboty.html`;
+const MAX_URL = 'https://max.ru/channel_Rekviem_Kolpashevo';
+const YANDEX_MAPS_URL =
+  'https://yandex.ru/maps/org/rekviyem/49913383774?si=xnf5r5a8qdq4gzvkf9an2c6q18';
 
-const AGENCY = {
-  name: 'Реквием',
-  phone: '8 923 415-50-00',
-  phoneLink: '+79234155000',
-  address: 'Томская область, г. Колпашево, ул. Победы, 14',
-  website: 'https://xn--b1afblipw.com/',
-  max: 'https://max.ru/channel_Rekviem_Kolpashevo',
-  googleMaps: 'https://maps.app.goo.gl/8yVRZFU5q4je6Fxr6',
-  photo: 'https://xn--b1afblipw.com/images/works/work17.jpg',
-};
+const PHONE = '+7 923 415-50-00';
 
-const REQUEST_PROMPT =
-  'Пожалуйста, ответьте на это сообщение одним сообщением. Опишите, что вам нужно, и оставьте номер телефона для связи. [Заявка в Реквием]';
+// Реальные фотографии из портфолио сайта «Реквием».
+const WORKS = [
+  {
+    url: 'https://xn--b1afblipw.com/images/portfolio/work-01.webp',
+    title: 'Памятник и благоустройство',
+  },
+  {
+    url: 'https://xn--b1afblipw.com/images/portfolio/work-05.webp',
+    title: 'Мемориальный комплекс',
+  },
+  {
+    url: 'https://xn--b1afblipw.com/images/portfolio/work-10.webp',
+    title: 'Памятник с оформлением участка',
+  },
+  {
+    url: 'https://xn--b1afblipw.com/images/portfolio/work-15.webp',
+    title: 'Памятник и плиточное оформление',
+  },
+  {
+    url: 'https://xn--b1afblipw.com/images/portfolio/work-62.webp',
+    title: 'Комплекс с ограждением',
+  },
+  {
+    url: 'https://xn--b1afblipw.com/images/portfolio/work-64.webp',
+    title: 'Памятник и художественная ограда',
+  },
+];
 
-// ДВА РАЗРЕШЁННЫХ АДМИНИСТРАТОРА
-const ADMIN_IDS = new Set([
-  '7330059190',
-  '6796155106',
-]);
+const TIME_OPTIONS = [
+  ['time:morning', '09:00–12:00'],
+  ['time:midday', '12:00–15:00'],
+  ['time:afternoon', '15:00–18:00'],
+  ['time:evening', '18:00–21:00'],
+  ['time:any', 'В любое время'],
+];
 
-async function telegram(token, method, payload = {}) {
+const CONTACT_OPTIONS = [
+  ['method:call', '📞 Звонок'],
+  ['method:telegram', '✈️ Telegram'],
+  ['method:max', '💬 MAX'],
+  ['method:whatsapp', '🟢 WhatsApp'],
+];
+
+function escapeHtml(value = '') {
+  return String(value)
+    .replaceAll('&', '&amp;')
+    .replaceAll('<', '&lt;')
+    .replaceAll('>', '&gt;')
+    .replaceAll('"', '&quot;');
+}
+
+async function telegram(method, payload) {
+  if (!BOT_TOKEN) throw new Error('Не задан BOT_TOKEN');
+
   const response = await fetch(
-    `${TELEGRAM_API}/bot${token}/${method}`,
+    `https://api.telegram.org/bot${BOT_TOKEN}/${method}`,
     {
       method: 'POST',
       headers: { 'content-type': 'application/json' },
@@ -32,351 +73,666 @@ async function telegram(token, method, payload = {}) {
     }
   );
 
-  const result = await response.json();
+  const result = await response.json().catch(() => ({}));
 
   if (!response.ok || !result.ok) {
     throw new Error(
-      result.description || `Telegram API error (${response.status})`
+      `Telegram ${method}: ${result.description || response.statusText}`
     );
   }
 
   return result.result;
 }
 
-function safeSecretEqual(received, expected) {
-  if (
-    typeof received !== 'string' ||
-    !received ||
-    received.length !== expected.length
-  ) {
-    return false;
-  }
+function sendMessage(chatId, text, replyMarkup) {
+  const payload = {
+    chat_id: chatId,
+    text,
+    parse_mode: 'HTML',
+    disable_web_page_preview: true,
+  };
 
-  return timingSafeEqual(
-    Buffer.from(received),
-    Buffer.from(expected)
-  );
+  if (replyMarkup) payload.reply_markup = replyMarkup;
+
+  return telegram('sendMessage', payload);
 }
 
-function userName(user = {}) {
-  return (
-    [user.first_name, user.last_name].filter(Boolean).join(' ') ||
-    'Не указано'
-  );
-}
+// ГЛАВНОЕ МЕНЮ
 
-function homeKeyboard() {
+function mainMenuKeyboard() {
   return {
     inline_keyboard: [
-      [{ text: '📩 Оставить заявку', callback_data: 'request' }],
-      [{ text: '☎️ Контакты', callback_data: 'contacts' }],
+      [
+        {
+          text: '🪦 Каталог памятников',
+          url: CATALOG_URL,
+        },
+      ],
+      [
+        {
+          text: '📸 Примеры выполненных работ',
+          callback_data: 'works:0',
+        },
+      ],
+      [
+        {
+          text: '📩 Оставить заявку',
+          callback_data: 'request',
+        },
+      ],
+      [
+        {
+          text: '💬 MAX',
+          url: MAX_URL,
+        },
+        {
+          text: '📍 Мы на карте',
+          url: YANDEX_MAPS_URL,
+        },
+      ],
+      [
+        {
+          text: '🌐 Наш сайт',
+          url: SITE,
+        },
+      ],
     ],
   };
 }
 
-async function showWelcome(token, chatId) {
-  const caption =
-    'Здравствуйте! Это ритуальное агентство «Реквием» в Колпашево.\n\n' +
-    'Поможем подобрать памятник, венок, оградку или благоустройство места захоронения. Ответим на вопросы и обсудим стоимость и сроки.\n\n' +
-    'Выберите, чем мы можем помочь:';
-
-  try {
-    await telegram(token, 'sendPhoto', {
-      chat_id: chatId,
-      photo: AGENCY.photo,
-      caption,
-      reply_markup: homeKeyboard(),
-    });
-  } catch {
-    await telegram(token, 'sendMessage', {
-      chat_id: chatId,
-      text: caption,
-      reply_markup: homeKeyboard(),
-    });
-  }
+function menuText() {
+  return [
+    '<b>🕯 РИТУАЛЬНОЕ АГЕНТСТВО «РЕКВИЕМ»</b>',
+    '',
+    'Памятники, мемориальные комплексы и благоустройство мест захоронения.',
+    'Поможем выбрать решение, покажем реальные работы и ответим на вопросы.',
+    '',
+    '<b>Чем можем помочь?</b>',
+    '📞 Телефон: +7 923 415-50-00',
+    '📍 Колпашево, ул. Победы, 14',
+    '',
+    'Выберите нужный раздел:',
+  ].join('\n');
 }
 
-async function showContacts(token, chatId) {
-  const text =
-    '☎️ Контакты агентства «Реквием»\n\n' +
-    `Телефон: ${AGENCY.phone}\n` +
-    `Адрес: ${AGENCY.address}\n\n` +
-    'Позвоните нам или напишите — подскажем по услугам, стоимости и срокам.';
+async function showMenu(chatId) {
+  return sendMessage(chatId, menuText(), mainMenuKeyboard());
+}
 
-  await telegram(token, 'sendMessage', {
-    chat_id: chatId,
-    text,
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: 'Написать в MAX', url: AGENCY.max }],
-        [{ text: 'Открыть сайт', url: AGENCY.website }],
-        [{ text: 'Google Карты', url: AGENCY.googleMaps }],
-        [{ text: '⬅️ В меню', callback_data: 'home' }],
+// КОНТАКТЫ
+
+async function showContacts(chatId) {
+  const text = [
+    '<b>📞 Контакты агентства «Реквием»</b>',
+    '',
+    `Телефон: ${PHONE}`,
+    'Адрес: г. Колпашево, ул. Победы, 14',
+    `Сайт: ${SITE}`,
+    `MAX: ${MAX_URL}`,
+  ].join('\n');
+
+  return sendMessage(chatId, text, {
+    inline_keyboard: [
+      [
+        {
+          text: '📩 Оставить заявку',
+          callback_data: 'request',
+        },
       ],
-    },
+      [
+        {
+          text: '📍 Яндекс Карты',
+          url: YANDEX_MAPS_URL,
+        },
+      ],
+      [
+        {
+          text: '↩️ Главное меню',
+          callback_data: 'menu',
+        },
+      ],
+    ],
   });
 }
 
-function isAllowedAdmin(message) {
-  return (
-    message.chat?.type === 'private' &&
-    ADMIN_IDS.has(String(message.from?.id))
+// ФОТОГАЛЕРЕЯ
+
+function galleryCaption(index) {
+  const item = WORKS[index];
+
+  return [
+    '<b>Примеры выполненных работ</b>',
+    escapeHtml(item.title),
+    '',
+    'Фото из портфолио агентства «Реквием».',
+  ].join('\n');
+}
+
+function galleryKeyboard(index) {
+  const previous = (index - 1 + WORKS.length) % WORKS.length;
+  const next = (index + 1) % WORKS.length;
+
+  return {
+    inline_keyboard: [
+      [
+        {
+          text: '⬅️ Назад',
+          callback_data: `works:${previous}`,
+        },
+        {
+          text: `${index + 1} / ${WORKS.length}`,
+          callback_data: 'noop',
+        },
+        {
+          text: 'Вперёд ➡️',
+          callback_data: `works:${next}`,
+        },
+      ],
+      [
+        {
+          text: '📩 Обсудить заказ',
+          callback_data: 'request',
+        },
+      ],
+      [
+        {
+          text: 'Все работы на сайте',
+          url: WORKS_URL,
+        },
+      ],
+      [
+        {
+          text: '↩️ Главное меню',
+          callback_data: 'menu',
+        },
+      ],
+    ],
+  };
+}
+
+async function showGallery(chatId, index) {
+  const safeIndex =
+    ((Number(index) || 0) % WORKS.length + WORKS.length) % WORKS.length;
+
+  return telegram('sendPhoto', {
+    chat_id: chatId,
+    photo: WORKS[safeIndex].url,
+    caption: galleryCaption(safeIndex),
+    parse_mode: 'HTML',
+    reply_markup: galleryKeyboard(safeIndex),
+  });
+}
+
+async function moveGallery(query, index) {
+  const safeIndex =
+    ((Number(index) || 0) % WORKS.length + WORKS.length) % WORKS.length;
+
+  return telegram('editMessageMedia', {
+    chat_id: query.message.chat.id,
+    message_id: query.message.message_id,
+    media: {
+      type: 'photo',
+      media: WORKS[safeIndex].url,
+      caption: galleryCaption(safeIndex),
+      parse_mode: 'HTML',
+    },
+    reply_markup: galleryKeyboard(safeIndex),
+  });
+}
+
+// ЗАЯВКА
+
+function forceReply(placeholder) {
+  return {
+    force_reply: true,
+    selective: true,
+    input_field_placeholder: placeholder,
+  };
+}
+
+async function startRequest(chatId) {
+  const text = [
+    '<b>📩 Заявка в агентство «Реквием»</b>',
+    '',
+    '<b>Шаг 1 из 4</b>',
+    'Как вас зовут? Напишите имя одним сообщением.',
+    '',
+    'В любой момент можно написать /cancel, чтобы отменить заявку.',
+  ].join('\n');
+
+  return sendMessage(chatId, text, forceReply('Ваше имя'));
+}
+
+function fieldFromPrompt(prompt, fieldName) {
+  const line = String(prompt || '')
+    .split('\n')
+    .find((item) => item.startsWith(`${fieldName}:`));
+
+  return line ? line.slice(fieldName.length + 1).trim() : '';
+}
+
+function cleanSingleLine(value, maxLength = 80) {
+  return String(value || '')
+    .replace(/[\r\n]+/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim()
+    .slice(0, maxLength);
+}
+
+function validPhone(value) {
+  const phone = String(value || '')
+    .replace(/[^0-9+()\-\\s]/g, '')
+    .trim();
+
+  const digits = phone.replace(/\D/g, '');
+
+  return digits.length >= 7 && digits.length <= 15
+    ? phone
+    : '';
+}
+
+// ШАГ 2 — ТЕЛЕФОН
+
+async function askPhone(chatId, name) {
+  const text = [
+    '<b>📩 Заявка — Шаг 2 из 4</b>',
+    `Имя: ${escapeHtml(name)}`,
+    '',
+    'Отправьте номер телефона сообщением.',
+    'Можно также прикрепить и отправить свой контакт.',
+  ].join('\n');
+
+  return sendMessage(
+    chatId,
+    text,
+    forceReply('Например, +7 900 000-00-00')
   );
 }
 
-async function claimAdmin(token, message) {
-  const chatId = message.chat.id;
+// ШАГ 3 — ВРЕМЯ
 
-  if (!isAllowedAdmin(message)) {
-    await telegram(token, 'sendMessage', {
-      chat_id: chatId,
-      text: '⛔ Доступ запрещён. Ваш аккаунт не входит в список администраторов.',
-    });
-    return;
-  }
+async function askTime(chatId, name, phone) {
+  const text = [
+    '<b>📩 Заявка — Шаг 3 из 4</b>',
+    `Имя: ${escapeHtml(name)}`,
+    `Телефон: ${escapeHtml(phone)}`,
+    '',
+    'Когда вам удобно, чтобы мы связались?',
+  ].join('\n');
 
-  await telegram(token, 'sendMessage', {
-    chat_id: chatId,
-    text: '✅ Ваш аккаунт подтверждён как администратор. Все новые заявки будут приходить вам и второму администратору.',
+  return sendMessage(chatId, text, {
+    inline_keyboard: [
+      TIME_OPTIONS.slice(0, 2).map(([data, label]) => ({
+        text: label,
+        callback_data: data,
+      })),
+      TIME_OPTIONS.slice(2, 4).map(([data, label]) => ({
+        text: label,
+        callback_data: data,
+      })),
+      [
+        {
+          text: TIME_OPTIONS[4][1],
+          callback_data: TIME_OPTIONS[4][0],
+        },
+      ],
+      [
+        {
+          text: '✖️ Отменить заявку',
+          callback_data: 'cancel',
+        },
+      ],
+    ],
   });
 }
 
-async function resetAdmin(token, message) {
-  const chatId = message.chat.id;
+// ШАГ 4 — СПОСОБ СВЯЗИ
 
-  if (!isAllowedAdmin(message)) {
-    await telegram(token, 'sendMessage', {
-      chat_id: chatId,
-      text: '⛔ Эта команда доступна только администраторам.',
-    });
-    return;
-  }
+async function askContactMethod(chatId, name, phone, time) {
+  const text = [
+    '<b>📩 Заявка — Шаг 4 из 4</b>',
+    `Имя: ${escapeHtml(name)}`,
+    `Телефон: ${escapeHtml(phone)}`,
+    `Удобное время: ${escapeHtml(time)}`,
+    '',
+    'Как вам удобнее получить ответ?',
+  ].join('\n');
 
-  await telegram(token, 'sendMessage', {
-    chat_id: chatId,
-    text: 'Список администраторов защищён в коде бота. Для изменения доступа нужно изменить ADMIN_IDS в telegram.mjs.',
+  return sendMessage(chatId, text, {
+    inline_keyboard: [
+      CONTACT_OPTIONS.slice(0, 2).map(([data, label]) => ({
+        text: label,
+        callback_data: data,
+      })),
+      CONTACT_OPTIONS.slice(2, 4).map(([data, label]) => ({
+        text: label,
+        callback_data: data,
+      })),
+      [
+        {
+          text: '✖️ Отменить заявку',
+          callback_data: 'cancel',
+        },
+      ],
+    ],
   });
 }
 
-async function sendLead(token, message) {
-  const customer = message.from || {};
+// ОТПРАВКА ЗАЯВКИ АДМИНИСТРАТОРАМ
 
-  const username = customer.username
-    ? `@${customer.username}`
-    : 'нет username';
+async function submitRequest(query, method) {
+  const prompt = query.message.text || '';
 
-  const details =
-    message.text ||
-    message.caption ||
-    (message.contact
-      ? `Телефон: ${message.contact.phone_number}`
-      : 'Пользователь отправил сообщение без текста.');
+  const name = fieldFromPrompt(prompt, 'Имя');
+  const phone = fieldFromPrompt(prompt, 'Телефон');
+  const time = fieldFromPrompt(prompt, 'Удобное время');
 
-  const adminText =
-    '📩 НОВАЯ ЗАЯВКА — РЕКВИЕМ\n\n' +
-    `Имя: ${userName(customer)}\n` +
-    `Telegram: ${username}\n` +
-    `ID клиента: ${customer.id || 'не указан'}\n\n` +
-    `Сообщение:\n${details}`;
+  const methods = {
+    call: 'Звонок',
+    telegram: 'Telegram',
+    max: 'MAX',
+    whatsapp: 'WhatsApp',
+  };
 
-  let delivered = 0;
+  const methodName = methods[method];
 
-  for (const adminChatId of ADMIN_IDS) {
-    try {
-      await telegram(token, 'sendMessage', {
-        chat_id: adminChatId,
-        text: adminText,
-        reply_markup: customer.username
-          ? {
-              inline_keyboard: [[
-                {
-                  text: 'Ответить клиенту',
-                  url: `https://t.me/${customer.username}`,
-                },
-              ]],
-            }
-          : undefined,
-      });
-
-      if (
-        !message.text &&
-        !message.caption &&
-        (
-          message.photo ||
-          message.document ||
-          message.voice ||
-          message.contact ||
-          message.location
-        )
-      ) {
-        await telegram(token, 'forwardMessage', {
-          chat_id: adminChatId,
-          from_chat_id: message.chat.id,
-          message_id: message.message_id,
-        });
+  if (!name || !phone || !time || !methodName) {
+    return sendMessage(
+      query.message.chat.id,
+      'Не удалось прочитать данные заявки. Пожалуйста, начните заполнение заново.',
+      {
+        inline_keyboard: [
+          [
+            {
+              text: '📩 Заполнить заявку',
+              callback_data: 'request',
+            },
+          ],
+        ],
       }
+    );
+  }
 
-      delivered++;
-    } catch (error) {
-      console.error(
-        `Could not deliver lead to admin ${adminChatId}:`,
-        error
-      );
+  const requester = query.from;
+
+  const usernameLink = requester.username
+    ? `@${escapeHtml(requester.username)}`
+    : `<a href="tg://user?id=${requester.id}">открыть профиль в Telegram</a>`;
+
+  const adminText = [
+    '<b>🔔 Новая заявка — «Реквием»</b>',
+    '',
+    `Имя: <b>${escapeHtml(name)}</b>`,
+    `Телефон: <b>${escapeHtml(phone)}</b>`,
+    `Удобное время: <b>${escapeHtml(time)}</b>`,
+    `Способ связи: <b>${escapeHtml(methodName)}</b>`,
+    '',
+    `Клиент в Telegram: ${usernameLink}`,
+    `Telegram ID: <code>${requester.id}</code>`,
+  ].join('\n');
+
+  const deliveries = await Promise.allSettled(
+    ADMIN_IDS.map((adminId) =>
+      sendMessage(adminId, adminText, {
+        inline_keyboard: [
+          [
+            {
+              text: 'Открыть переписку с клиентом',
+              url: `tg://user?id=${requester.id}`,
+            },
+          ],
+        ],
+      })
+    )
+  );
+
+  const delivered = deliveries.filter(
+    (item) => item.status === 'fulfilled'
+  ).length;
+
+  console.log(
+    `Request notification delivered to ${delivered}/${ADMIN_IDS.length} admins`
+  );
+
+  await sendMessage(
+    query.message.chat.id,
+    delivered > 0
+      ? '✅ <b>Спасибо! Заявка отправлена.</b>\nМы свяжемся с вами выбранным способом в удобное время.'
+      : '✅ <b>Заявка принята.</b>\nУведомление администраторам не прошло. Пожалуйста, позвоните нам: +7 923 415-50-00.',
+    {
+      inline_keyboard: [
+        [
+          {
+            text: '↩️ В главное меню',
+            callback_data: 'menu',
+          },
+        ],
+      ],
     }
-  }
-
-  if (delivered === 0) {
-    throw new Error('Could not deliver the lead to either administrator.');
-  }
-
-  await telegram(token, 'sendMessage', {
-    chat_id: message.chat.id,
-    text:
-      'Спасибо. Ваше обращение отправлено в агентство «Реквием». Мы свяжемся с вами по указанному номеру.\n\n' +
-      'При необходимости можно позвонить напрямую: 8 923 415-50-00.',
-    reply_markup: homeKeyboard(),
-  });
+  );
 }
 
-async function handleMessage(token, message) {
+// ОБРАБОТКА СООБЩЕНИЙ
+
+async function handleMessage(message) {
   const chatId = message.chat.id;
-  const text = message.text || '';
+  const fromId = message.from?.id;
+  const text = String(message.text || '').trim();
 
-  if (text.startsWith('/start')) {
-    await showWelcome(token, chatId);
-    return;
-  }
-
-  if (text === '/myid') {
-    await telegram(token, 'sendMessage', {
-      chat_id: chatId,
-      text: `Ваш Telegram ID: ${message.from?.id}`,
-    });
-    return;
-  }
-
-  if (text === '/admin') {
-    await claimAdmin(token, message);
-    return;
-  }
-
-  if (text === '/resetadmin') {
-    await resetAdmin(token, message);
-    return;
-  }
-
-  if (text === '/contacts') {
-    await showContacts(token, chatId);
+  if (text === '/start' || text.startsWith('/start ')) {
+    await showMenu(chatId);
     return;
   }
 
   if (text === '/cancel') {
-    await telegram(token, 'sendMessage', {
-      chat_id: chatId,
-      text: 'Хорошо, оформление заявки отменено. Чтобы вернуться к меню, отправьте /start.',
-      reply_markup: homeKeyboard(),
-    });
+    await sendMessage(
+      chatId,
+      'Заявка отменена. Вы можете начать заново в любой момент.',
+      mainMenuKeyboard()
+    );
     return;
   }
 
-  const reply = message.reply_to_message;
+  if (text === '/admin') {
+    if (!ADMIN_IDS.includes(fromId)) {
+      await sendMessage(chatId, 'Команда недоступна.');
+      return;
+    }
 
-  const isRequestReply = Boolean(
-    reply?.from?.is_bot &&
-    reply?.text === REQUEST_PROMPT
-  );
-
-  if (isRequestReply) {
-    await sendLead(token, message);
+    await sendMessage(
+      chatId,
+      '✅ Вы авторизованы как администратор. Новые заявки будут приходить сюда.'
+    );
     return;
   }
 
-  await telegram(token, 'sendMessage', {
-    chat_id: chatId,
-    text: 'Чтобы оставить заявку, нажмите «Оставить заявку» и ответьте на сообщение бота. Контакты агентства доступны по кнопке ниже.',
-    reply_markup: homeKeyboard(),
-  });
+  if (text === '/resetadmin') {
+    if (!ADMIN_IDS.includes(fromId)) {
+      await sendMessage(chatId, 'Команда недоступна.');
+      return;
+    }
+
+    await sendMessage(
+      chatId,
+      'Настройки администратора не требуют сброса. Список разрешённых ID зафиксирован в коде.'
+    );
+    return;
+  }
+
+  const repliedPrompt = message.reply_to_message?.from?.is_bot
+    ? (message.reply_to_message.text ||
+       message.reply_to_message.caption ||
+       '')
+    : '';
+
+  // ШАГ 1 — ИМЯ
+
+  if (repliedPrompt.includes('Шаг 1 из 4')) {
+    const name = cleanSingleLine(text, 60);
+
+    if (!name) {
+      await startRequest(chatId);
+      return;
+    }
+
+    await askPhone(chatId, name);
+    return;
+  }
+
+  // ШАГ 2 — ТЕЛЕФОН
+
+  if (repliedPrompt.includes('Шаг 2 из 4')) {
+    const name = fieldFromPrompt(repliedPrompt, 'Имя');
+
+    if (
+      message.contact?.user_id &&
+      message.contact.user_id !== fromId
+    ) {
+      await askPhone(chatId, name);
+      return;
+    }
+
+    const phone = validPhone(
+      message.contact?.phone_number || text
+    );
+
+    if (!phone || !name) {
+      await askPhone(chatId, name);
+      return;
+    }
+
+    await askTime(chatId, name, phone);
+    return;
+  }
+
+  if (text && !text.startsWith('/')) {
+    await sendMessage(
+      chatId,
+      'Чтобы посмотреть услуги или оставить заявку, воспользуйтесь меню ниже.',
+      mainMenuKeyboard()
+    );
+  }
 }
 
-async function handleCallback(token, callback) {
-  const chatId = callback.message?.chat?.id;
+// ОБРАБОТКА КНОПОК
+
+async function handleCallback(query) {
+  const data = String(query.data || '');
+  const chatId = query.message?.chat?.id;
+
+  await telegram('answerCallbackQuery', {
+    callback_query_id: query.id,
+  }).catch(() => {});
 
   if (!chatId) return;
 
-  await telegram(token, 'answerCallbackQuery', {
-    callback_query_id: callback.id,
-  });
+  if (data === 'noop') return;
 
-  if (callback.data === 'request') {
-    await telegram(token, 'sendMessage', {
-      chat_id: chatId,
-      text: REQUEST_PROMPT,
-      reply_markup: {
-        force_reply: true,
-        selective: true,
-        input_field_placeholder: 'Опишите задачу и укажите телефон',
-      },
-    });
-    return;
+  if (data === 'menu') {
+    return showMenu(chatId);
   }
 
-  if (callback.data === 'contacts') {
-    await showContacts(token, chatId);
-    return;
+  if (data === 'request' || data === 'request:start') {
+    return startRequest(chatId);
   }
 
-  if (callback.data === 'home') {
-    await showWelcome(token, chatId);
+  if (data === 'cancel') {
+    return sendMessage(
+      chatId,
+      'Заявка отменена. Вы можете вернуться к заполнению позже.',
+      mainMenuKeyboard()
+    );
+  }
+
+  if (data.startsWith('works:')) {
+    const index = Number(data.split(':')[1]);
+
+    if (query.message.photo?.length) {
+      return moveGallery(query, index);
+    }
+
+    return showGallery(chatId, index);
+  }
+
+  if (data.startsWith('time:')) {
+    const prompt = query.message.text || '';
+
+    const name = fieldFromPrompt(prompt, 'Имя');
+    const phone = fieldFromPrompt(prompt, 'Телефон');
+
+    const key = data.split(':')[1];
+
+    const timeMap = Object.fromEntries(
+      TIME_OPTIONS.map(([callback, label]) => [
+        callback.split(':')[1],
+        label,
+      ])
+    );
+
+    const time = timeMap[key];
+
+    if (!name || !phone || !time) {
+      return sendMessage(
+        chatId,
+        'Не удалось продолжить заявку. Начните заполнение заново.',
+        {
+          inline_keyboard: [
+            [
+              {
+                text: '📩 Заполнить заявку',
+                callback_data: 'request',
+              },
+            ],
+          ],
+        }
+      );
+    }
+
+    return askContactMethod(chatId, name, phone, time);
+  }
+
+  if (data.startsWith('method:')) {
+    return submitRequest(query, data.split(':')[1]);
   }
 }
 
+// WEBHOOK — АДРЕС И ПОДКЛЮЧЕНИЕ НЕ МЕНЯЮТСЯ
+
 export default async (request) => {
   if (request.method !== 'POST') {
-    return new Response('Telegram webhook is running.', {
+    return new Response('Requiem Telegram bot is running', {
       status: 200,
     });
   }
 
-  const token = process.env.BOT_TOKEN;
+  const expectedSecret =
+    process.env.TELEGRAM_WEBHOOK_SECRET ||
+    process.env.TELEGRAM_SECRET_TOKEN ||
+    process.env.WEBHOOK_SECRET;
 
-  if (!token) {
-    return new Response('BOT_TOKEN is missing.', {
-      status: 500,
-    });
-  }
+  if (expectedSecret) {
+    const receivedSecret = request.headers.get(
+      'x-telegram-bot-api-secret-token'
+    );
 
-  const expectedSecret = createHash('sha256')
-    .update(token)
-    .digest('hex');
-
-  const receivedSecret = request.headers.get(
-    'x-telegram-bot-api-secret-token'
-  );
-
-  if (!safeSecretEqual(receivedSecret, expectedSecret)) {
-    return new Response('Unauthorized', {
-      status: 401,
-    });
+    if (receivedSecret !== expectedSecret) {
+      return new Response('Forbidden', { status: 403 });
+    }
   }
 
   try {
     const update = await request.json();
 
-    if (update.callback_query) {
-      await handleCallback(token, update.callback_query);
-    } else if (update.message) {
-      await handleMessage(token, update.message);
+    if (update.message) {
+      await handleMessage(update.message);
     }
 
-    return new Response('OK', {
-      status: 200,
-    });
-
+    if (update.callback_query) {
+      await handleCallback(update.callback_query);
+    }
   } catch (error) {
-    console.error('Telegram webhook error:', error);
-
-    return new Response('Webhook processing failed.', {
-      status: 500,
-    });
+    console.error('Telegram handler error:', error);
   }
+
+  return new Response('OK', { status: 200 });
 };
